@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "data-assimilation-with-generative-ML"
+version = "0.1.0"
+license = {file = "LICENSE.txt"}
+description = "A package for data assimilation with generative machine learning."
+readme = "README.md"
+requires-python = ">=3.6"
+dependencies = [
+    "tqdm >= 4.64.1",
+    "numpy >= 1.23.5",
+    "scipy >= 1.10.0",
+    "matplotlib >= 3.6.3",
+    "torch >= 2.3.1+cu118",
+    "torchaudio >= 2.3.1+cu118",
+    "torchvision >= 0.18.1+cu118",
+    "xarray >= 2024.6.0",
+    "netCDF4 > =1.7.1.post1",
+    "pdbpp",
+    "torchdiffeq >= 0.2.4",
+    "git+https://github.com/AdamCobb/hamiltorch"
+]
+
+[project.urls]
+"Homepage" = "https://github.com/nmucke/data-assimilation-with-generative-ML.git"
+
+[tool.pytest.ini_options]
+addopts = [
+    "--import-mode=importlib",
+]
+
+[tool.coverage.run]
+source = ["src/data_assimilation_with_generative_ML"]
+omit = ["*/__init__.py"]
