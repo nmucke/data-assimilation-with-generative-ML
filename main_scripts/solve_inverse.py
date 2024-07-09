@@ -29,7 +29,7 @@ def latent_to_sample(
     device
 ):
     
-    latent_vec = latent_vec.reshape(1, 2, gen_model.imsize, gen_model.imsize)
+    latent_vec = latent_vec.reshape(1, 1, gen_model.imsize, gen_model.imsize)
 
     pars_sample = ode_sampler(
         z=latent_vec,
@@ -76,37 +76,61 @@ def observation_operator(x):
 
 def main():
 
-    data = xr.load_dataset(f'data/results64/simulation_results_realization_64x64_1.nc')     
+    data = xr.load_dataset(f'data/results64/simulation_results_realization_64x64_4.nc')     
 
-    perm_mean = 3.5748687267303465
-    perm_std = 4.6395333366394045
-    por_mean = 0.09433708190917969
-    por_std = 0.03279830865561962
+    perm_mean = -1.3754382634162903 #3.5748687267303465
+    perm_std = 3.6160271644592283 #4.6395333366394045
+    # por_mean = 0.09433708190917969
+    # por_std = 0.03279830865561962
 
     pressure_mean = 336.26219848632815
     pressure_std = 130.7361669921875
+    pressure_min = 51.5
+    pressure_max = 299.43377685546875
     co2_mean = 0.03664950348436832
     co2_std = 0.13080736815929414
 
     ft_min = 0.0
     ft_max = 28074.49609375
 
-    state = np.stack((data['Pressure'].data, data['CO_2'].data), axis=0)
-    pars = np.stack((data['Perm'].data, data['Por'].data), axis=0)
+
+    perm_mean = -1.3754382634162903 #3.5748687267303465
+    perm_std = 3.6160271644592283 #4.6395333366394045
+    # self.por_mean = 0.09433708190917969
+    # self.por_std = 0.03279830865561962
+
+
+    pressure_mean = 59.839262017194635 # 336.26219848632815
+    pressure_std = 16.946480998339133 #130.7361669921875
+    co2_mean = 0.9997552563110158 #0.03664950348436832
+    co2_std = 0.004887599662507033 #0.13080736815929414
+
+    ft_min = 6.760696180663217e-08 #0.0
+    ft_max = 0.0009333082125522196 #28074.49609375
+
+
+    # state = np.stack((data['Pressure'].data, data['CO_2'].data), axis=0)
+    state = np.concat((data['PRESSURE'].data, data['H2O'].data), axis=1)
+    pars = data['Perm'].data[0] # np.stack((data['Perm'].data, data['Por'].data), axis=0)
     ft = data['gas_rate'].data[0]
 
     state = torch.tensor(state, dtype=torch.float32)
+    state = torch.permute(state, (1, 2, 3, 0))
     pars = torch.tensor(pars, dtype=torch.float32)
+    pars = torch.log(pars)
+    # pars = pars.unsqueeze(0)
     ft = torch.tensor(ft, dtype=torch.float32)
 
-    state[0] = (state[0] - pressure_mean) / pressure_std
-    state[1] = (state[1] - co2_mean) / co2_std
+    # state[0] = (state[0] - pressure_mean) / pressure_std
+    state[0] = (state[0] - pressure_min) / (pressure_max - pressure_min)
+
+    # state[1] = (state[1] - co2_mean) / co2_std
     pars[0] = (pars[0] - perm_mean) / perm_std
-    pars[1] = (pars[1] - por_mean) / por_std
+    # pars[1] = (pars[1] - por_mean) / por_std
 
     ft = (ft - ft_min) / (ft_max - ft_min)
 
-    state = torch.permute(state, (0, 2, 3, 1))
+    # state = torch.permute(state, (0, 2, 3, 1))
     
     state = state.unsqueeze(0)
     pars = pars.unsqueeze(0)
@@ -121,7 +145,7 @@ def main():
     marginal_prob_std_fn = functools.partial(marginal_prob_std, sigma=sigma)
     diffusion_coeff_fn = functools.partial(diffusion_coeff, sigma=sigma)
 
-    score_model = DiTScoreNet(marginal_prob_std=marginal_prob_std_fn, imsize=64, in_channels=2)
+    score_model = DiTScoreNet(marginal_prob_std=marginal_prob_std_fn, imsize=64, in_channels=1)
     score_model.load_state_dict(torch.load('ckpt.pth'))
     score_model = score_model.to(device)
     score_model.eval()
@@ -134,7 +158,7 @@ def main():
         'heads': 8,
         'mlp_dim': 1024,
         'k': 128,
-        'in_channels': 4,
+        'in_channels': 3,
     }
     forward_model = ForwardModel(model_args)
     forward_model.load_state_dict(torch.load('forward_model.pth'))
@@ -154,7 +178,7 @@ def main():
 
     noise_std = 0.1
     state_true = state.clone()
-    state_noisy = state_true# + torch.randn_like(state_true) * noise_std
+    state_noisy = state_true + torch.randn_like(state_true) * noise_std
     state_obs = observation_operator(state_noisy)
     state_obs = state_obs.to(device)
 
@@ -170,11 +194,11 @@ def main():
         noise_std=noise_std
     )
 
-    latent_vec = torch.randn(1, 2, 64, 64).to(device)
+    latent_vec = torch.randn(1, 1, 64, 64).to(device)
     latent_vec.requires_grad = True
-    optimizer = torch.optim.Adam([latent_vec], lr=5e-3)
+    optimizer = torch.optim.Adam([latent_vec], lr=1e-1)
 
-    for i in range(10):
+    for i in range(250):
         optimizer.zero_grad()
         loss = -log_prob(latent_vec)
         loss.backward()
@@ -184,7 +208,7 @@ def main():
     state_map = sampling_model(latent_vec)
     state_map_obs = observation_operator(state_map)
 
-    latent_vec = latent_vec.reshape(1, 2, score_model.imsize, score_model.imsize)
+    latent_vec = latent_vec.reshape(1, 1, score_model.imsize, score_model.imsize)
 
     pars_map = ode_sampler(
         z=latent_vec,
@@ -197,40 +221,50 @@ def main():
 
 
     plt.figure()
-    plt.subplot(3, 2, 1)
+    plt.subplot(4, 2, 1)
     plt.imshow(state_true.detach().cpu().numpy()[0, 0, :, :, -1])
     plt.scatter(X, Y, color='r', s=10)
-    plt.title('True state')
+    plt.title('True pressure')
     plt.colorbar()
-    plt.subplot(3, 2, 2)
+    plt.subplot(4, 2, 2)
     plt.imshow(state_map.detach().cpu().numpy()[0, 0, :, :, -1])
-    # plt.scatter(X, Y, color='r', s=10)
     plt.colorbar()
-    plt.title('MAP state')
-    plt.subplot(3, 2, 3)
+    plt.title('MAP pressure')
+    plt.subplot(4, 2, 3)
+    plt.imshow(state_true.detach().cpu().numpy()[0, 1, :, :, -1])
+    plt.scatter(X, Y, color='r', s=10)
+    plt.title('True CO2')
+    plt.colorbar()
+    plt.subplot(4, 2, 4)
+    plt.imshow(state_map.detach().cpu().numpy()[0, 1, :, :, -1])
+    plt.colorbar()
+    plt.title('MAP CO2')
+    plt.subplot(4, 2, 5)
     plt.imshow(pars.detach().cpu().numpy()[0, 0, :, :])
     plt.colorbar()
     plt.title('True permiability')
-    plt.subplot(3, 2, 4)
+    plt.subplot(4, 2, 6)
     plt.imshow(pars_map.detach().cpu().numpy()[0, 0, :, :])
     plt.colorbar()
     plt.title('MAP permiability')
 
-    plt.subplot(3, 2, 5)
-    plt.plot(state_obs_true.detach().cpu().numpy()[0,0], label='True')
-    plt.plot(state_obs.detach().cpu().numpy()[0,0], label='True w. noise')
-    plt.plot(state_map_obs.detach().cpu().numpy()[0,0], label='MAP')
-    plt.grid()
-    plt.title('Observations')
-    plt.legend()
-
-    plt.subplot(3, 2, 6)
+    plt.subplot(4, 2, 7)
     plt.plot(state_obs_true.detach().cpu().numpy()[3,3], label='True')
     plt.plot(state_obs.detach().cpu().numpy()[3,3], label='True w. noise')
     plt.plot(state_map_obs.detach().cpu().numpy()[3,3], label='MAP')
     plt.grid()
     plt.title('Observations')
     plt.legend()
+
+    plt.subplot(4, 2, 8)
+    plt.plot(state_obs_true.detach().cpu().numpy()[5,5], label='True')
+    plt.plot(state_obs.detach().cpu().numpy()[5,5], label='True w. noise')
+    plt.plot(state_map_obs.detach().cpu().numpy()[5,5], label='MAP')
+    plt.grid()
+    plt.title('Observations')
+    plt.legend()
+
+    plt.savefig('inverse.png')
     
     plt.show()
 

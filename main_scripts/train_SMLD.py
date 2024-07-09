@@ -15,6 +15,7 @@ import xarray as xr
 from torchdiffeq import odeint_adjoint
 
 from data_assimilation_with_generative_ML.diffusion_models import (
+    ConvScoreNet,
     DiTScoreNet,
     loss_fn,
     marginal_prob_std,
@@ -30,30 +31,36 @@ class ParsDataset(torch.utils.data.Dataset):
     def __init__(self, path):
         self.path = path
 
-        self.ids_list = range(1, 1001)
+        self.ids_list = range(0, 1342)
 
         self.min = 1e8
         self.max = 0
         
-        self.perm_mean = 3.5748687267303465
-        self.perm_std = 4.6395333366394045
-        self.por_mean = 0.09433708190917969
-        self.por_std = 0.03279830865561962
+        self.perm_mean = 2.5359260627303146#-1.3754382634162903 #3.5748687267303465
+        self.perm_std = 2.1896950964067803#3.6160271644592283 #4.6395333366394045
+
+        #self.por_mean = 0.09433708190917969
+        #self.por_std = 0.03279830865561962
 
 
     def __len__(self):
-        return 1000
+        return len(self.ids_list)
 
     def __getitem__(self, idx):
 
         data = xr.load_dataset(f'{self.path}_{self.ids_list[idx]}.nc')
 
-        pars = np.stack((data['Perm'].data, data['Por'].data), axis=0)
+        #pars = np.stack((data['Perm'].data, data['Por'].data), axis=0)
+        # pars = data['Perm'].data[0]
+        pars = data['PRESSURE'].data[0]
 
         pars = torch.tensor(pars, dtype=torch.float32)
+        # pars = torch.log(pars)
 
-        pars[0] = (pars[0] - self.perm_mean) / self.perm_std
-        pars[1] = (pars[1] - self.por_mean) / self.por_std
+
+
+        # pars[0] = (pars[0] - self.perm_mean) / self.perm_std
+        # pars[1] = (pars[1] - self.por_mean) / self.por_std
 
         return pars
 
@@ -62,7 +69,7 @@ def main():
 
     device = 'cuda' #@param ['cuda', 'cpu'] {'type':'string'}
 
-  
+
     sigma =  25.0#@param {'type':'number'}
     marginal_prob_std_fn = functools.partial(marginal_prob_std, sigma=sigma)
     diffusion_coeff_fn = functools.partial(diffusion_coeff, sigma=sigma)
@@ -70,9 +77,9 @@ def main():
 
     # score_model  = DiTScoreNet(marginal_prob_std=marginal_prob_std_fn, imsize=64)
     # score_model = torch.nn.DataParallel(ConvScoreNet(marginal_prob_std=marginal_prob_std_fn))
-    # score_model = ConvScoreNet(marginal_prob_std=marginal_prob_std_fn, imsize=64)
+    score_model = ConvScoreNet(marginal_prob_std=marginal_prob_std_fn, imsize=64, in_channels=1)
 
-    score_model = DiTScoreNet(marginal_prob_std=marginal_prob_std_fn, imsize=64, in_channels=2)
+    # score_model = DiTScoreNet(marginal_prob_std=marginal_prob_std_fn, imsize=64, in_channels=1)
     # score_model.load_state_dict(torch.load('ckpt.pth'))
     score_model = score_model.to(device)
 
@@ -89,8 +96,19 @@ def main():
     # Sample only 5000 samples for training
     # dataset = torch.utils.data.Subset(dataset, np.random.choice(len(dataset), 5000))
     # data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4)
-    # x = xr.load_dataset(f'data/results64/simulation_results_realization_64x64_1.nc')
-    dataset = ParsDataset(path='data/results64/simulation_results_realization_64x64')
+    # ds = xr.load_dataset(f'data/64x64.nc')
+    # x = ds['facies code'].isel(Z=0, Realization=1).plot()
+
+
+    # ds = xr.load_dataset('data/geodata/processed_DARTS_simulation_realization_0.nc')
+    # show me all variable names
+    # ds.data_vars
+    # c_0_rate Min: 6.760696180663217e-08, Max: 0.0009333082125522196
+    # H2O Mean: 0.9997552563110158, Std: 0.004887599662507033
+    # PRESSURE 59.839262017194635, Std: 16.946480998339133
+
+
+    dataset = ParsDataset(path='data/geodata/processed_DARTS_simulation_realization')
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4)
 
 
@@ -99,22 +117,33 @@ def main():
     # num_samples = dataset.shape[0]
 
     # compute mean over the full dataset by looping over the dataloader
-    # mean = 0.
-    # num_items = 0
-    # for x in data_loader:
-    #     mean += x.mean().item() * x.shape[0]
-    #     num_items += x.shape[0]
-    # mean /= num_items
-    
-    # # compute standard deviation over the full dataset by looping over the dataloader
-    # std = 0.
-    # num_items = 0
-    # for x in data_loader:
-    #     std += x.std().item() * x.shape[0]
-    #     num_items += x.shape[0]
-    # std /= num_items
+    mean = 0.
+    num_items = 0
 
-    # print(f'Mean: {mean}, Std: {std}')
+    min = 1e8
+    for x in data_loader:
+        mean += x.mean().item()# * x.shape[0]
+        num_items += 1#x.shape[0]
+
+        if x.min() < min:
+            min = x.min()
+    mean /= num_items
+    
+    # compute standard deviation over the full dataset by looping over the dataloader
+    std = 0.
+    num_items = 0
+    max = -1e8
+    for x in data_loader:
+        std += x.std().item() * x.shape[0]
+        num_items += x.shape[0]
+
+        if x.max() > max:
+            max = x.max()
+
+    std /= num_items
+
+    print(f'Mean: {mean}, Std: {std}')
+    print(f'Min: {min}, Max: {max}')
 
 
 
@@ -135,7 +164,7 @@ def main():
         for x in data_loader:
         # for batch_ids in range(0, num_samples, batch_size):
             # x = dataset[batch_ids:batch_ids+batch_size]
-            x = x.to(device)    
+            x = x.to(device)  
             loss = loss_fn(score_model, x, marginal_prob_std_fn)
             optimizer.zero_grad()
             loss.backward()
@@ -161,12 +190,14 @@ def main():
             for i in range(8):
                 plt.subplot(4, 4, i+1)
                 plt.imshow(samples[i])
+                plt.colorbar()
                 plt.axis('off')
 
             x = next(iter(data_loader)).cpu().numpy()
             for i in range(8):
                 plt.subplot(4, 4, i+9)
                 plt.imshow(x[i, 0])
+                plt.colorbar()
                 plt.axis('off')
             plt.savefig('pc_samples.png')
             plt.close()
@@ -179,12 +210,14 @@ def main():
             for i in range(8):
                 plt.subplot(4, 4, i+1)
                 plt.imshow(samples[i])
+                plt.colorbar()
                 plt.axis('off')
 
             x = next(iter(data_loader)).cpu().numpy()
             for i in range(8):
                 plt.subplot(4, 4, i+9)
                 plt.imshow(x[i, 0])
+                plt.colorbar()
                 plt.axis('off')
             plt.savefig('ode_samples.png')
             plt.close()
