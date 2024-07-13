@@ -25,6 +25,7 @@ from data_assimilation_with_generative_ML.diffusion_models import (
 )
 
 from data_assimilation_with_generative_ML.neural_network_models import DiT
+from data_assimilation_with_generative_ML.transformer_layers import UNet_Tranformer
 
 
 class ParsDataset(torch.utils.data.Dataset):
@@ -51,16 +52,13 @@ class ParsDataset(torch.utils.data.Dataset):
         data = xr.load_dataset(f'{self.path}_{self.ids_list[idx]}.nc')
 
         #pars = np.stack((data['Perm'].data, data['Por'].data), axis=0)
-        # pars = data['Perm'].data[0]
-        pars = data['PRESSURE'].data[0]
+        pars = data['Perm'].data[0]
+        # pars = data['U_z'].data[0]
 
         pars = torch.tensor(pars, dtype=torch.float32)
-        # pars = torch.log(pars)
+        pars = torch.log(pars)
 
-
-
-        # pars[0] = (pars[0] - self.perm_mean) / self.perm_std
-        # pars[1] = (pars[1] - self.por_mean) / self.por_std
+        pars[0] = (pars[0] - self.perm_mean) / self.perm_std
 
         return pars
 
@@ -77,13 +75,18 @@ def main():
 
     # score_model  = DiTScoreNet(marginal_prob_std=marginal_prob_std_fn, imsize=64)
     # score_model = torch.nn.DataParallel(ConvScoreNet(marginal_prob_std=marginal_prob_std_fn))
-    score_model = ConvScoreNet(marginal_prob_std=marginal_prob_std_fn, imsize=64, in_channels=1)
-
+    # score_model = ConvScoreNet(marginal_prob_std=marginal_prob_std_fn, imsize=64, in_channels=1)
     # score_model = DiTScoreNet(marginal_prob_std=marginal_prob_std_fn, imsize=64, in_channels=1)
-    # score_model.load_state_dict(torch.load('ckpt.pth'))
+    score_model = UNet_Tranformer(
+        marginal_prob_std=marginal_prob_std_fn, 
+        in_channels=1,
+        channels=[32, 64, 128, 256],
+        imsize=64,
+    )
+    score_model.load_state_dict(torch.load('diffusion_model.pth'))
     score_model = score_model.to(device)
 
-    
+
 
     n_epochs =   5000#@param {'type':'integer'}
     ## size of a mini-batch
@@ -106,6 +109,7 @@ def main():
     # c_0_rate Min: 6.760696180663217e-08, Max: 0.0009333082125522196
     # H2O Mean: 0.9997552563110158, Std: 0.004887599662507033
     # PRESSURE 59.839262017194635, Std: 16.946480998339133
+    # U_z min: -0.03506183251738548, Max: -7.1078920882428065e-06
 
 
     dataset = ParsDataset(path='data/geodata/processed_DARTS_simulation_realization')
@@ -145,6 +149,8 @@ def main():
     print(f'Mean: {mean}, Std: {std}')
     print(f'Min: {min}, Max: {max}')
 
+    pdb.set_trace()
+
 
 
     optimizer = Adam(score_model.parameters(), lr=lr, weight_decay=1e-8)
@@ -177,49 +183,49 @@ def main():
         # Print the averaged training loss so far.
         tqdm_epoch.set_description('Average Loss: {:5f}'.format(avg_loss / num_items))
         # Update the checkpoint after each epoch of training.
-        torch.save(score_model.state_dict(), 'ckpt.pth')
+        torch.save(score_model.state_dict(), 'diffusion_model.pth')
 
 
         if epoch % 100 == 0:
+            x = next(iter(data_loader)).cpu().numpy()
+
             score_model.eval()
             with torch.no_grad():
-                samples = pc_sampler(score_model, marginal_prob_std_fn, diffusion_coeff_fn, device=device, batch_size=8)
+                samples = pc_sampler(score_model, marginal_prob_std_fn, diffusion_coeff_fn, device=device, batch_size=8, num_steps=50)
             samples = samples.cpu().numpy()
             samples = samples[:, 0]
             plt.figure()
             for i in range(8):
                 plt.subplot(4, 4, i+1)
-                plt.imshow(samples[i])
+                plt.imshow(samples[i], vmin=x.min(), vmax=x.max())
                 plt.colorbar()
                 plt.axis('off')
 
-            x = next(iter(data_loader)).cpu().numpy()
             for i in range(8):
                 plt.subplot(4, 4, i+9)
-                plt.imshow(x[i, 0])
+                plt.imshow(x[i, 0], vmin=x.min(), vmax=x.max())
                 plt.colorbar()
                 plt.axis('off')
-            plt.savefig('pc_samples.png')
+            plt.savefig('pc_samples.pdf')
             plt.close()
 
             with torch.no_grad():
-                samples = ode_sampler(score_model, marginal_prob_std_fn, diffusion_coeff_fn, device=device, num_steps=500, batch_size=8)
+                samples = ode_sampler(score_model, marginal_prob_std_fn, diffusion_coeff_fn, device=device, num_steps=50, batch_size=8)
             samples = samples.detach().cpu().numpy()
             samples = samples[:, 0]
             plt.figure()
             for i in range(8):
                 plt.subplot(4, 4, i+1)
-                plt.imshow(samples[i])
+                plt.imshow(samples[i], vmin=x.min(), vmax=x.max())
                 plt.colorbar()
                 plt.axis('off')
 
-            x = next(iter(data_loader)).cpu().numpy()
             for i in range(8):
                 plt.subplot(4, 4, i+9)
-                plt.imshow(x[i, 0])
+                plt.imshow(x[i, 0], vmin=x.min(), vmax=x.max())
                 plt.colorbar()
                 plt.axis('off')
-            plt.savefig('ode_samples.png')
+            plt.savefig('ode_samples.pdf')
             plt.close()
             score_model.train()
     return 0

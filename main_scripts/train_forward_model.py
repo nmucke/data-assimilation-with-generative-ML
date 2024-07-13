@@ -44,6 +44,9 @@ class ForwardModelDataset(torch.utils.data.Dataset):
         self.pressure_max = 299.43377685546875
         self.co2_mean = 0.9997552563110158 #0.03664950348436832
         self.co2_std = 0.004887599662507033 #0.13080736815929414
+        self.U_z_min = -0.03506183251738548
+        self.U_z_max = -7.1078920882428065e-06
+        
 
         self.ft_min = 6.760696180663217e-08 #0.0
         self.ft_max = 0.0009333082125522196 #28074.49609375
@@ -51,13 +54,13 @@ class ForwardModelDataset(torch.utils.data.Dataset):
 
 
     def __len__(self):
-        return len(self.ids_list)
+        return 100 # len(self.ids_list)
 
     def __getitem__(self, idx):
 
         data = xr.load_dataset(f'{self.path}_{self.ids_list[idx]}.nc')
 
-        state = np.concat((data['PRESSURE'].data, data['H2O'].data), axis=1)
+        state = np.concat((data['PRESSURE'].data, data['H2O'].data, data['U_z'].data), axis=1)
         
         pars = data['Perm'].data[0] # np.stack((data['Perm'].data, data['Por'].data), axis=0)
         ft = data['c_0_rate'].data[0]
@@ -73,6 +76,7 @@ class ForwardModelDataset(torch.utils.data.Dataset):
         # state[0] = (state[0] - self.pressure_mean) / self.pressure_std
 
         state[0] = (state[0] - self.pressure_min) / (self.pressure_max - self.pressure_min)
+        state[2] = (state[2] - self.U_z_min) / (self.U_z_max - self.U_z_min)
         #state[1] = (state[1] - self.co2_mean) / self.co2_std
         pars[0] = (pars[0] - self.perm_mean) / self.perm_std
         #pars[1] = (pars[1] - self.por_mean) / self.por_std
@@ -96,7 +100,7 @@ def main():
         'heads': 8,
         'mlp_dim': 1024,
         'k': 128,
-        'in_channels': 3,
+        'in_channels': 4,
     }
     forward_model = ForwardModel(model_args)
     # forward_model.load_state_dict(torch.load('forward_model.pth'))
@@ -115,7 +119,9 @@ def main():
     # state = torch.permute(state, (1, 2, 3, 0))
     
     # dataset = ForwardModelDataset(path='data/results64/simulation_results_realization_64x64')
-    dataset = ForwardModelDataset(path='data/geodata/processed_DARTS_simulation_realization')
+    path = 'data/geodata/processed_DARTS_simulation_realization'
+    dataset = ForwardModelDataset(path=path)
+
     
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4)
 
@@ -132,63 +138,29 @@ def main():
         avg_loss = 0.
         num_items = 0
 
-        if epoch % 250 == 0 and num_steps < 10:
+        if epoch % 200 == 0 and num_steps < 20:
             num_steps += 1
 
         for state, pars, ft in data_loader:
 
-
             pars = pars.to(device)
             ft = ft.to(device)
-
 
             i = np.random.randint(0, ft.shape[-1]-num_steps)
 
             batch_state_0 = state[:, :, :, :, i].to(device)
+
             batch_state_1 = state[:, :, :, :, (i+1):(i+1+num_steps)].to(device)
 
             pred_state_1 = forward_model(batch_state_0, pars, ft[:, i:i+num_steps])
 
             loss = loss_fn(pred_state_1, batch_state_1)
 
-            
-            # if epoch < 250:
-
-            #     i = np.random.randint(0, ft.shape[-1]-1)
-
-            #     batch_state_0 = state[:, :, :, :, i].to(device)
-            #     batch_state_1 = state[:, :, :, :, i+1].to(device)
-
-            #     pred_state_1 = forward_model.compute_one_step(batch_state_0, pars, ft[:, i])
-
-            #     loss = loss_fn(pred_state_1, batch_state_1)
-                
-            # elif epoch >= 250 and epoch < 500:
-
-            #     i = np.random.randint(0, ft.shape[-1]-11)
-
-            #     batch_state_0 = state[:, :, :, :, i].to(device)
-            #     batch_state_1 = state[:, :, :, :, (i+1):(i+11)].to(device)
-
-            #     pred_state_1 = forward_model(batch_state_0, pars, ft[:, i:i+10])
-
-            #     loss = loss_fn(pred_state_1, batch_state_1)
-
-            # else:
-                
-            #     state = state.to(device)
-            #     state_0 = state[:, :, :, :, 0].to(device)
-
-            #     pred_state = forward_model(state_0, pars, ft)
-            #     loss = loss_fn(pred_state, state)
-                    
-
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             avg_loss += loss.item()
             num_items += 1
-
 
         scheduler.step()
 
@@ -198,7 +170,7 @@ def main():
         torch.save(forward_model.state_dict(), 'forward_model.pth')
 
 
-        if epoch % 5 == 0:
+        if epoch % 50 == 0:
 
             forward_model.eval()
 
@@ -211,16 +183,26 @@ def main():
 
             pred_state = forward_model(state_0, pars, ft)
 
-            mse = loss_fn(pred_state, state)
-            print(f'Val MSE: {mse.item()}')
-            
+            # Compute RMSE
+            RMSE_pres = torch.sqrt(loss_fn(pred_state[:, 0], state[:, 0]))
+            print(f'RMSE pressure: {RMSE_pres.item()}')
+
+            RMSE_co2 = torch.sqrt(loss_fn(pred_state[:, 1], state[:, 1]))
+            print(f'RMSE co2: {RMSE_co2.item()}')
+
+            RMSE_U_z = torch.sqrt(loss_fn(pred_state[:, 2], state[:, 2]))
+            print(f'RMSE U_z: {RMSE_U_z.item()}')
+
             pred_state = pred_state.detach().cpu().numpy()
 
 
             x = state.cpu().numpy()
-            t_vec = [15, 30, 45, 60]
+            t_vec = [30, 60, 90, 119]
             pres_min = x[0, 0].min()
-            pres_max = x[0, 0].max()
+            pres_max = x[0, 0].max()    
+
+            err_min = (x[0, 0] - pred_state[0, 0]).min()
+            err_max = (x[0, 0] - pred_state[0, 0]).max()
             plt.figure()
             for i in range(4):
                 plt.subplot(3, 4, i+1)
@@ -235,17 +217,19 @@ def main():
                 plt.axis('off')
 
             for i in range(4):
+                RMSE = torch.sqrt(loss_fn(torch.tensor(x[0, 0, :, :, t_vec[i]]), torch.tensor(pred_state[0, 0, :, :, t_vec[i]])))
                 plt.subplot(3, 4, i+9)
-                plt.imshow(x[0, 0, :, :, t_vec[i]]-pred_state[0, 0, :, :, t_vec[i]], vmin=-pres_min, vmax=pres_max)
+                plt.imshow(x[0, 0, :, :, t_vec[i]]-pred_state[0, 0, :, :, t_vec[i]], vmin=-err_min, vmax=err_max)
+                plt.title(f't={t_vec[i]:0.0f},RMSE={RMSE:0.3f}', fontsize=8)
                 plt.colorbar()
                 plt.axis('off')
 
 
-            plt.savefig('forward_model_samples_pressure.png')
+            plt.savefig('forward_model_samples_pressure.pdf')
             plt.close()
 
-            co2_min = x[0, 1].min()
-            co2_max = x[0, 1].max()
+            err_min = (x[0, 1] - pred_state[0, 1]).min()
+            err_max = (x[0, 1] - pred_state[0, 1]).max()
 
             plt.figure()
             for i in range(4):
@@ -261,18 +245,48 @@ def main():
                 plt.axis('off')
 
             for i in range(4):
+                RMSE = torch.sqrt(loss_fn(torch.tensor(x[0, 1, :, :, t_vec[i]]), torch.tensor(pred_state[0, 1, :, :, t_vec[i]])))
                 plt.subplot(3, 4, i+9)
-                plt.imshow(x[0, 1, :, :, t_vec[i]]-pred_state[0, 1, :, :, t_vec[i]])
+                plt.imshow(x[0, 1, :, :, t_vec[i]]-pred_state[0, 1, :, :, t_vec[i]], vmin=-err_min, vmax=err_max)
+                plt.title(f't={t_vec[i]:0.0f}, RMSE={RMSE:0.3f}', fontsize=8)
                 plt.colorbar()
                 plt.axis('off')
 
-            plt.savefig('forward_model_samples_co2.png')
+            plt.savefig('forward_model_samples_co2.pdf')
+            plt.close()
+
+            err_min = (x[0, 2] - pred_state[0, 2]).min()
+            err_max = (x[0, 2] - pred_state[0, 2]).max()
+            U_z_min = x[0, 2].min()
+            U_z_max = x[0, 2].max()
+
+            plt.figure()
+            for i in range(4):
+                plt.subplot(3, 4, i+1)
+                plt.imshow(pred_state[0, 2, :, :, t_vec[i]], vmin=U_z_min, vmax=U_z_max)
+                plt.colorbar()
+                plt.axis('off')
+
+            for i in range(4):
+                plt.subplot(3, 4, i+5)
+                plt.imshow(x[0, 2, :, :, t_vec[i]], vmin=U_z_min, vmax=U_z_max)
+                plt.colorbar()
+                plt.axis('off')
+
+            for i in range(4):
+                RMSE = torch.sqrt(loss_fn(torch.tensor(x[0, 2, :, :, t_vec[i]]), torch.tensor(pred_state[0, 2, :, :, t_vec[i]])))
+                plt.subplot(3, 4, i+9)
+                plt.imshow(x[0, 2, :, :, t_vec[i]]-pred_state[0, 2, :, :, t_vec[i]], vmin=-err_min, vmax=err_max)
+                plt.title(f't={t_vec[i]:0.0f}, RMSE={RMSE:0.3f}', fontsize=8)
+                plt.colorbar()
+                plt.axis('off')
+
+            plt.savefig('forward_model_samples_Uz.pdf')
             plt.close()
 
 
 
             forward_model.train()
-
 
     return 0
 

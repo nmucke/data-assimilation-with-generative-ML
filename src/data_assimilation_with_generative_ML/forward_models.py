@@ -18,7 +18,7 @@ class ForwardModel(nn.Module):
 
         self.final_layer = nn.Conv2d(
             in_channels=model_args['in_channels'], 
-            out_channels=2, 
+            out_channels=3, 
             kernel_size=3, 
             stride=1, 
             padding=1,

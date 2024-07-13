@@ -318,13 +318,16 @@ def ode_sampler(score_model,
         otherwise, we start from the given z.
         eps: The smallest time step for numerical stability.
     """
+    if z is not None:
+       batch_size = z.shape[0]
+       
     t = torch.ones(batch_size, device=device)
     # Create the latent code
     if z is None:
         init_x = torch.randn(batch_size, score_model.in_channels, score_model.imsize, score_model.imsize, device=device) \
         * marginal_prob_std(t)[:, None, None, None]
     else:
-        init_x = z
+        init_x = z * marginal_prob_std(t)[:, None, None, None]
         
     shape = init_x.shape
     device = init_x.device
