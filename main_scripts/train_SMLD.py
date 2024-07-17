@@ -14,6 +14,7 @@ import matplotlib.pyplot as plt
 import xarray as xr
 from torchdiffeq import odeint_adjoint
 
+from data_assimilation_with_generative_ML.datasets import ParsDataset
 from data_assimilation_with_generative_ML.diffusion_models import (
     ConvScoreNet,
     DiTScoreNet,
@@ -28,39 +29,6 @@ from data_assimilation_with_generative_ML.neural_network_models import DiT
 from data_assimilation_with_generative_ML.transformer_layers import UNet_Tranformer
 
 
-class ParsDataset(torch.utils.data.Dataset):
-    def __init__(self, path):
-        self.path = path
-
-        self.ids_list = range(0, 1342)
-
-        self.min = 1e8
-        self.max = 0
-        
-        self.perm_mean = 2.5359260627303146#-1.3754382634162903 #3.5748687267303465
-        self.perm_std = 2.1896950964067803#3.6160271644592283 #4.6395333366394045
-
-        #self.por_mean = 0.09433708190917969
-        #self.por_std = 0.03279830865561962
-
-
-    def __len__(self):
-        return len(self.ids_list)
-
-    def __getitem__(self, idx):
-
-        data = xr.load_dataset(f'{self.path}_{self.ids_list[idx]}.nc')
-
-        #pars = np.stack((data['Perm'].data, data['Por'].data), axis=0)
-        pars = data['Perm'].data[0]
-        # pars = data['U_z'].data[0]
-
-        pars = torch.tensor(pars, dtype=torch.float32)
-        pars = torch.log(pars)
-
-        pars[0] = (pars[0] - self.perm_mean) / self.perm_std
-
-        return pars
 
 def main():
     #@title Set up the SDE
@@ -148,9 +116,6 @@ def main():
 
     print(f'Mean: {mean}, Std: {std}')
     print(f'Min: {min}, Max: {max}')
-
-    pdb.set_trace()
-
 
 
     optimizer = Adam(score_model.parameters(), lr=lr, weight_decay=1e-8)
