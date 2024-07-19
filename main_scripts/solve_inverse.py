@@ -206,6 +206,12 @@ def main():
         'k': 128,
         'in_channels': 4,
     }
+    model_args = {
+        'marginal_prob_std':None, 
+        'in_channels':4,
+        'channels':[32, 64, 128, 256],
+        'imsize':64,
+    }
     forward_model = ForwardModel(model_args)
     forward_model.load_state_dict(torch.load('forward_model.pth'))
     forward_model = forward_model.to(device)

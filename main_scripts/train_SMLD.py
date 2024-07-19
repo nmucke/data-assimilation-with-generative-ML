@@ -48,10 +48,10 @@ def main():
     score_model = UNet_Tranformer(
         marginal_prob_std=marginal_prob_std_fn, 
         in_channels=1,
-        channels=[32, 64, 128, 256],
+        channels=[4, 8, 16, 32],
         imsize=64,
     )
-    score_model.load_state_dict(torch.load('diffusion_model.pth'))
+    # score_model.load_state_dict(torch.load('diffusion_model.pth'))
     score_model = score_model.to(device)
 
 
@@ -89,33 +89,33 @@ def main():
     # num_samples = dataset.shape[0]
 
     # compute mean over the full dataset by looping over the dataloader
-    mean = 0.
-    num_items = 0
+    # mean = 0.
+    # num_items = 0
 
-    min = 1e8
-    for x in data_loader:
-        mean += x.mean().item()# * x.shape[0]
-        num_items += 1#x.shape[0]
+    # min = 1e8
+    # for x in data_loader:
+    #     mean += x.mean().item()# * x.shape[0]
+    #     num_items += 1#x.shape[0]
 
-        if x.min() < min:
-            min = x.min()
-    mean /= num_items
+    #     if x.min() < min:
+    #         min = x.min()
+    # mean /= num_items
     
-    # compute standard deviation over the full dataset by looping over the dataloader
-    std = 0.
-    num_items = 0
-    max = -1e8
-    for x in data_loader:
-        std += x.std().item() * x.shape[0]
-        num_items += x.shape[0]
+    # # compute standard deviation over the full dataset by looping over the dataloader
+    # std = 0.
+    # num_items = 0
+    # max = -1e8
+    # for x in data_loader:
+    #     std += x.std().item() * x.shape[0]
+    #     num_items += x.shape[0]
 
-        if x.max() > max:
-            max = x.max()
+    #     if x.max() > max:
+    #         max = x.max()
 
-    std /= num_items
+    # std /= num_items
 
-    print(f'Mean: {mean}, Std: {std}')
-    print(f'Min: {min}, Max: {max}')
+    # print(f'Mean: {mean}, Std: {std}')
+    # print(f'Min: {min}, Max: {max}')
 
 
     optimizer = Adam(score_model.parameters(), lr=lr, weight_decay=1e-8)

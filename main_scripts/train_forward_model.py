@@ -44,15 +44,21 @@ def main():
         'k': 128,
         'in_channels': 4,
     }
+    model_args = {
+        'marginal_prob_std':None, 
+        'in_channels':4,
+        'channels':[16, 32, 64, 128],
+        'imsize':64,
+    }
     forward_model = ForwardModel(model_args)
-    # forward_model.load_state_dict(torch.load('forward_model.pth'))
+    forward_model.load_state_dict(torch.load('forward_model.pth'))
 
     forward_model = forward_model.to(device)
 
 
     n_epochs =   5000#@param {'type':'integer'}
     ## size of a mini-batch
-    batch_size = 4 #@param {'type':'integer'}
+    batch_size = 8 #@param {'type':'integer'}
     ## learning rate
     lr=5e-4 #@param {'type':'number'}
 
@@ -74,13 +80,13 @@ def main():
 
     loss_fn = nn.MSELoss()
     tqdm_epoch = tqdm.trange(n_epochs)
-    num_steps = 1
+    num_steps = 20
     for epoch in tqdm_epoch:
 
         avg_loss = 0.
         num_items = 0
 
-        if epoch % 200 == 0 and num_steps < 20:
+        if epoch % 100 == 0 and num_steps < 10:
             num_steps += 1
 
         for state, pars, ft in data_loader:

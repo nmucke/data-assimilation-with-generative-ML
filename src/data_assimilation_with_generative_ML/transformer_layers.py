@@ -116,7 +116,7 @@ class CrossAttention(nn.Module):
             V = self.value(context)
 
         # Compute score matrices, attention matrices, and context vectors
-        scoremats = torch.einsum("BTH,BSH->BTS", Q, K)  # Inner product of Q and K, a tensor
+        scoremats = torch.einsum("BTH,BSH->BTS", Q, K)  # Inner product of Q an d K, a tensor
         attnmats = F.softmax(scoremats / math.sqrt(self.embed_dim), dim=-1)  # Softmax of scoremats
         ctx_vecs = torch.einsum("BTS,BSH->BTH", attnmats, V)  # Weighted average value vectors by attnmats
 
@@ -170,11 +170,12 @@ class TransformerBlock(nn.Module):
         # Apply self-attention with layer normalization and residual connection
         x = self.attn_self(self.norm1(x)) + x
 
-        # Apply cross-attention with layer normalization and residual connection
-        x = self.attn_cross(self.norm2(x), context=context) + x
+        if context is not None:
+            # Apply cross-attention with layer normalization and residual connection
+            x = self.attn_cross(self.norm2(x), context=context) + x
 
         # Apply feed forward neural network with layer normalization and residual connection
-        x = self.ffn(self.norm3(x)) + x
+        # x = self.ffn(self.norm3(x)) + x
 
         return x
 
@@ -218,6 +219,65 @@ class SpatialTransformer(nn.Module):
         # Residue connection
         return x + x_in
 
+class ConvNextBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, embed_dim):
+        """
+        Initialize the ConvNextBlock.
+
+        Parameters:
+        - in_channels: The number of input channels.
+        - out_channels: The number of output channels.
+        - embed_dim: The dimensionality of the Gaussian random feature embeddings.
+        """
+        super(ConvNextBlock, self).__init__()
+
+        # Convolutional layer with kernel size 3x3
+        self.conv1 = nn.Conv2d(in_channels, in_channels, 7, stride=1, padding=3)
+
+        # Gaussian random feature embedding layer
+        self.dense = nn.Sequential(
+            nn.Linear(embed_dim, in_channels)
+        )
+
+        self.conv_net = nn.Sequential(
+            nn.GroupNorm(1, num_channels=in_channels),
+            nn.Conv2d(in_channels, 3*in_channels, 3, stride=1, padding=1),
+            nn.GELU(),
+            nn.GroupNorm(1, num_channels=3*in_channels),
+            nn.Conv2d(3*in_channels, out_channels, 3, stride=1, padding=1),
+        )
+
+        self.skip_conv = nn.Conv2d(in_channels, out_channels, 1, stride=1)
+
+
+    def forward(self, x, t):
+        """
+        Forward pass of the ConvNextBlock.
+
+        Parameters:
+        - x: Input tensor.
+        - t: Time tensor.
+
+        Returns:
+        - h: Output tensor after passing through the ConvNextBlock.
+        """
+        
+        # Obtain the Gaussian random feature embedding for t
+        embed = self.dense(t)
+        embed = embed[..., None, None]
+
+        # Convolutional layer
+        h = self.conv1(x) + embed
+
+        # Convolutional neural network
+        h = self.conv_net(h)
+
+        # Skip connection
+        h = h + self.skip_conv(x)
+
+        return h
+
+
 
 class UNet_Tranformer(nn.Module):
     """A time-dependent score-based model built upon U-Net architecture."""
@@ -249,46 +309,54 @@ class UNet_Tranformer(nn.Module):
         # Gaussian random feature embedding layer for time
         self.time_embed = nn.Sequential(
             GaussianFourierProjection(embed_dim=embed_dim),
-            nn.Linear(embed_dim, embed_dim)
+            nn.Linear(embed_dim, embed_dim),
+            nn.GELU(),
+            nn.Linear(embed_dim, embed_dim),
+            nn.GELU(),
         )
 
         # Encoding layers where the resolution decreases
-        self.conv1 = nn.Conv2d(in_channels, channels[0], 3, stride=1, bias=False)
-        self.dense1 = Dense(embed_dim, channels[0])
-        self.gnorm1 = nn.GroupNorm(4, num_channels=channels[0])
+        self.enc_conv1 = ConvNextBlock(in_channels, channels[0], embed_dim)
+        self.down1 = nn.Conv2d(channels[0], channels[0], 4, stride=2, padding=1)
 
-        self.conv2 = nn.Conv2d(channels[0], channels[1], 3, stride=2, bias=False)
-        self.dense2 = Dense(embed_dim, channels[1])
-        self.gnorm2 = nn.GroupNorm(32, num_channels=channels[1])
+        self.enc_conv2 = ConvNextBlock(channels[0], channels[1], embed_dim)
+        self.down2 = nn.Conv2d(channels[1], channels[1], 4, stride=2, padding=1)
 
-        self.conv3 = nn.Conv2d(channels[1], channels[2], 3, stride=2, bias=False)
-        self.dense3 = Dense(embed_dim, channels[2])
-        self.gnorm3 = nn.GroupNorm(32, num_channels=channels[2])
-        self.attn3 = SpatialTransformer(channels[2], None)
+        self.enc_conv3 = ConvNextBlock(channels[1], channels[2], embed_dim)
+        self.down3 = nn.Conv2d(channels[2], channels[2], 4, stride=2, padding=1)
+        # self.enc_attn3 = SpatialTransformer(channels[2], None)
 
-        self.conv4 = nn.Conv2d(channels[2], channels[3], 3, stride=2, bias=False)
-        self.dense4 = Dense(embed_dim, channels[3])
-        self.gnorm4 = nn.GroupNorm(32, num_channels=channels[3])
-        self.attn4 = SpatialTransformer(channels[3], None)
+        self.enc_conv4 = ConvNextBlock(channels[2], channels[3], embed_dim)
+        self.down4 = nn.Conv2d(channels[3], channels[3], 4, stride=2, padding=1)
+        # self.enc_attn4 = SpatialTransformer(channels[3], None)
+
+
+        # Bottle neck
+        self.bottle_neck1 = ConvNextBlock(channels[3], 2*channels[3], embed_dim)
+        self.bottle_neck_attn = SpatialTransformer(2*channels[3], None)
+        # self.bottle_neck2 = ConvNextBlock(2*channels[3], channels[3], embed_dim)
+
 
         # Decoding layers where the resolution increases
-        self.tconv4 = nn.ConvTranspose2d(channels[3], channels[2], 3, stride=2, bias=False, output_padding=1)
-        self.dense5 = Dense(embed_dim, channels[2])
-        self.tgnorm4 = nn.GroupNorm(32, num_channels=channels[2])
-        self.attn5 = SpatialTransformer(channels[2], None)
+        self.dec_conv1 = ConvNextBlock(2*channels[3], channels[3], embed_dim)
+        self.up1 = nn.ConvTranspose2d(channels[3], channels[3], 4, stride=2, padding=1)
+        # self.dec_attn1 = SpatialTransformer(channels[3], None)
 
-        self.tconv3 = nn.ConvTranspose2d(channels[2], channels[1], 3, stride=2, bias=False, output_padding=1)
-        self.dense6 = Dense(embed_dim, channels[1])
-        self.tgnorm3 = nn.GroupNorm(32, num_channels=channels[1])
-        self.attn6 = SpatialTransformer(channels[1], None)
+        self.dec_conv2 = ConvNextBlock(2*channels[3], channels[2], embed_dim)
+        self.up2 = nn.ConvTranspose2d(channels[2], channels[2], 4, stride=2, padding=1)
+        # self.dec_attn2 = SpatialTransformer(channels[2], None)
 
-        self.tconv2 = nn.ConvTranspose2d(channels[1], channels[0], 3, stride=2, bias=False, output_padding=1)
-        self.dense7 = Dense(embed_dim, channels[0])
-        self.tgnorm2 = nn.GroupNorm(32, num_channels=channels[0])
-        self.tconv1 = nn.ConvTranspose2d(channels[0], in_channels, 3, stride=1)
+        self.dec_conv3 = ConvNextBlock(2*channels[2], channels[1], embed_dim)
+        self.up3 = nn.ConvTranspose2d(channels[1], channels[1], 4, stride=2, padding=1)
+
+        self.dec_conv4 = ConvNextBlock(2*channels[1], channels[1], embed_dim)
+        self.up4 = nn.ConvTranspose2d(channels[1], channels[0], 4, stride=2, padding=1)
+
+        self.final_layer1 = nn.Conv2d(2*channels[0], channels[0], 3, stride=1, padding=1)
+        self.final_layer2 = nn.Conv2d(channels[0], in_channels, 3, stride=1, padding=1, bias=False)
 
         # The swish activation function
-        self.act = nn.SiLU()
+        self.act = nn.GELU()
         self.marginal_prob_std = marginal_prob_std
 
     def forward(self, x, t):
@@ -307,28 +375,53 @@ class UNet_Tranformer(nn.Module):
         embed = self.act(self.time_embed(t))
 
         # Encoding path
-        h1 = self.conv1(x) + self.dense1(embed)
-        h1 = self.act(self.gnorm1(h1))
-        h2 = self.conv2(h1) + self.dense2(embed)
-        h2 = self.act(self.gnorm2(h2))
-        h3 = self.conv3(h2) + self.dense3(embed)
-        h3 = self.act(self.gnorm3(h3))
-        h3 = self.attn3(h3)
-        h4 = self.conv4(h3) + self.dense4(embed)
-        h4 = self.act(self.gnorm4(h4))
-        h4 = self.attn4(h4)
+        h1 = self.enc_conv1(x, embed)
+        h = self.down1(h1)
+        
+        h2 = self.enc_conv2(h, embed)
+        h = self.down2(h2)
+        
+        h3 = self.enc_conv3(h, embed)
+        # h3 = self.enc_attn3(h3)
+        h = self.down3(h3)
+
+        h4 = self.enc_conv4(h, embed)
+        # h4 = self.enc_attn4(h4)
+        h = self.down4(h4)
+
+
+        # Bottle neck
+        h = self.bottle_neck1(h, embed)
+        h = self.bottle_neck_attn(h)
+        # h = self.bottle_neck2(h, embed)
+
 
         # Decoding path
-        h = self.tconv4(h4) + self.dense5(embed)
-        h = self.act(self.tgnorm4(h))
-        h = self.attn5(h)
-        h = self.tconv3(h + h3) + self.dense6(embed)
-        h = self.act(self.tgnorm3(h))
-        h = self.attn6(h)
-        h = self.tconv2(h + h2) + self.dense7(embed)
-        h = self.act(self.tgnorm2(h))
-        h = self.tconv1(h + h1)
+        h = self.dec_conv1(h, embed)
+        # h = self.dec_attn1(h)
+        h = self.up1(h)
+
+    
+        h = torch.cat([h, h4], dim=1)
+        h = self.dec_conv2(h, embed)
+        # h = self.dec_attn2(h)
+        h = self.up2(h)
+
+        h = torch.cat([h, h3], dim=1)
+        h = self.dec_conv3(h, embed)
+        h = self.up3(h)
+        
+        h = torch.cat([h, h2], dim=1)
+        h = self.dec_conv4(h, embed)
+        h = self.up4(h)
+
+        h = torch.cat([h, h1], dim=1)
+        h = self.final_layer1(h)
+        h = self.act(h)
+        h = self.final_layer2(h)
 
         # Normalize output
-        h = h / self.marginal_prob_std(t)[:, None, None, None]
+        if self.marginal_prob_std is not None:
+            h = h / self.marginal_prob_std(t)[:, None, None, None]
         return h
+    
