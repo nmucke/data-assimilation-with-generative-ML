@@ -6,6 +6,33 @@ import math
 from einops import rearrange
 import numpy as np
 
+from data_assimilation_with_generative_ML.neural_network_models import LinformerAttention, PositionalEmbedding
+
+class PositionalEncoding(nn.Module):
+
+    def __init__(self, d_model: int, dropout: float = 0.1, max_len: int = 5000):
+        super().__init__()
+        self.dropout = nn.Dropout(p=dropout)
+
+        position = torch.arange(max_len).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
+        pe = torch.zeros(max_len, 1, d_model)
+        pe[:, 0, 0::2] = torch.sin(position * div_term)
+        pe[:, 0, 1::2] = torch.cos(position * div_term)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x):
+        """
+        Arguments:
+            x: Tensor, shape ``[seq_len, batch_size, embedding_dim]``
+        """
+        x = torch.swapaxes(x, 0, 1)
+
+        x = x + self.pe[:x.size(0)]
+
+        x = torch.swapaxes(x, 0, 1)
+        return self.dropout(x)
+
 # Define a module for Gaussian random features used to encode time steps.
 class GaussianFourierProjection(nn.Module):
     def __init__(self, embed_dim, scale=30.):
@@ -179,6 +206,63 @@ class TransformerBlock(nn.Module):
 
         return x
 
+class SpatialLinformerAttention(nn.Module):
+    def __init__(self, seq_len, dim, n_heads, k, bias=True):
+        """
+        Initialize the SpatialLinFormerBlock.
+
+        Parameters:
+        - hidden_dim: The dimensionality of the hidden state.
+        - context_dim: The dimensionality of the context tensor.
+        """
+        super(SpatialLinformerAttention, self).__init__()
+
+        self.norm = nn.GroupNorm(1, dim)
+        
+        self.attention = LinformerAttention(
+            seq_len=seq_len,
+            dim=dim,
+            n_heads=n_heads,
+            k=k,
+            bias=bias
+        )
+
+        self.pos_embedding = PositionalEncoding(dim) #GaussianFourierProjection(dim)
+
+    def forward(self, x, context=None):
+        """
+        Forward pass of the SpatialLinFormerBlock.
+
+        Parameters:
+        - x: Input tensor with shape [batch, channels, height, width].
+        - context: Context tensor with shape [batch, context_seq_len, context_dim].
+
+        Returns:
+        - x: Output tensor after applying spatial transformation.
+        """
+        b, c, h, w = x.shape
+        x_in = x
+
+        # Apply norm
+        x = self.norm(x)
+
+        # Combine the spatial dimensions and move the channel dimension to the end
+        x = rearrange(x, "b c h w -> b (h w) c")
+
+        # Apply the positional embedding
+        x = self.pos_embedding(x)
+
+
+        # Apply the sequence transformer
+        x = self.attention(x)
+
+        # Reverse the process
+        x = rearrange(x, 'b (h w) c -> b c h w', h=h, w=w)
+
+        # Residue connection
+        return x + x_in
+
+
 class SpatialTransformer(nn.Module):
     def __init__(self, hidden_dim, context_dim):
         """
@@ -306,6 +390,12 @@ class UNet_Tranformer(nn.Module):
         self.in_channels = in_channels
         self.imsize = imsize
 
+
+        imsizes = [self.imsize // 2**i for i in range(5)]
+        seq_lens = [i**2 for i in imsizes]
+        k_values = [i // 2 for i in seq_lens]
+        heads = [1, 1, 2, 2, 4]
+
         # Gaussian random feature embedding layer for time
         self.time_embed = nn.Sequential(
             GaussianFourierProjection(embed_dim=embed_dim),
@@ -317,39 +407,91 @@ class UNet_Tranformer(nn.Module):
 
         # Encoding layers where the resolution decreases
         self.enc_conv1 = ConvNextBlock(in_channels, channels[0], embed_dim)
+        # self.enc_attn1 = SpatialLinformerAttention(
+        #     seq_len=seq_lens[0],
+        #     dim=channels[0],
+        #     n_heads=heads[0],
+        #     k=k_values[0]
+        # )
         self.down1 = nn.Conv2d(channels[0], channels[0], 4, stride=2, padding=1)
 
         self.enc_conv2 = ConvNextBlock(channels[0], channels[1], embed_dim)
+        # self.enc_attn2 = SpatialLinformerAttention(
+        #     seq_len=seq_lens[1],
+        #     dim=channels[1],
+        #     n_heads=heads[1],
+        #     k=k_values[1]
+        # )
         self.down2 = nn.Conv2d(channels[1], channels[1], 4, stride=2, padding=1)
 
         self.enc_conv3 = ConvNextBlock(channels[1], channels[2], embed_dim)
+        self.enc_attn3 = SpatialLinformerAttention(
+            seq_len=seq_lens[2],
+            dim=channels[2],
+            n_heads=heads[2],
+            k=k_values[2]
+        )
         self.down3 = nn.Conv2d(channels[2], channels[2], 4, stride=2, padding=1)
-        # self.enc_attn3 = SpatialTransformer(channels[2], None)
 
         self.enc_conv4 = ConvNextBlock(channels[2], channels[3], embed_dim)
+        self.enc_attn4 = SpatialLinformerAttention(
+            seq_len=seq_lens[3],
+            dim=channels[3],
+            n_heads=heads[3],
+            k=k_values[3]
+        )
         self.down4 = nn.Conv2d(channels[3], channels[3], 4, stride=2, padding=1)
-        # self.enc_attn4 = SpatialTransformer(channels[3], None)
 
 
         # Bottle neck
         self.bottle_neck1 = ConvNextBlock(channels[3], 2*channels[3], embed_dim)
-        self.bottle_neck_attn = SpatialTransformer(2*channels[3], None)
+
+        self.bottle_neck_attn = SpatialLinformerAttention(
+            seq_len=seq_lens[4],
+            dim=2*channels[3],
+            n_heads=heads[4],
+            k=k_values[4]
+        )
+        
         # self.bottle_neck2 = ConvNextBlock(2*channels[3], channels[3], embed_dim)
 
 
         # Decoding layers where the resolution increases
         self.dec_conv1 = ConvNextBlock(2*channels[3], channels[3], embed_dim)
+        self.dec_attn1 = SpatialLinformerAttention(
+            seq_len=seq_lens[4],
+            dim=channels[3],
+            n_heads=heads[4],
+            k=k_values[4]
+        )
         self.up1 = nn.ConvTranspose2d(channels[3], channels[3], 4, stride=2, padding=1)
-        # self.dec_attn1 = SpatialTransformer(channels[3], None)
 
+        
         self.dec_conv2 = ConvNextBlock(2*channels[3], channels[2], embed_dim)
+        self.dec_attn2 = SpatialLinformerAttention(
+            seq_len=seq_lens[3],
+            dim=channels[2],
+            n_heads=heads[3],
+            k=k_values[3]
+        )
         self.up2 = nn.ConvTranspose2d(channels[2], channels[2], 4, stride=2, padding=1)
-        # self.dec_attn2 = SpatialTransformer(channels[2], None)
 
         self.dec_conv3 = ConvNextBlock(2*channels[2], channels[1], embed_dim)
+        # self.dec_attn3 = SpatialLinformerAttention(
+        #     seq_len=seq_lens[2],
+        #     dim=channels[1],
+        #     n_heads=heads[2],
+        #     k=k_values[2]
+        # )
         self.up3 = nn.ConvTranspose2d(channels[1], channels[1], 4, stride=2, padding=1)
 
         self.dec_conv4 = ConvNextBlock(2*channels[1], channels[1], embed_dim)
+        # self.dec_attn4 = SpatialLinformerAttention(
+        #     seq_len=seq_lens[1],
+        #     dim=channels[0],
+        #     n_heads=heads[1],
+        #     k=k_values[1]
+        # )
         self.up4 = nn.ConvTranspose2d(channels[1], channels[0], 4, stride=2, padding=1)
 
         self.final_layer1 = nn.Conv2d(2*channels[0], channels[0], 3, stride=1, padding=1)
@@ -382,12 +524,13 @@ class UNet_Tranformer(nn.Module):
         h = self.down2(h2)
         
         h3 = self.enc_conv3(h, embed)
-        # h3 = self.enc_attn3(h3)
+        h3 = self.enc_attn3(h3)
         h = self.down3(h3)
 
         h4 = self.enc_conv4(h, embed)
-        # h4 = self.enc_attn4(h4)
+        h4 = self.enc_attn4(h4)
         h = self.down4(h4)
+
 
 
         # Bottle neck
@@ -398,13 +541,13 @@ class UNet_Tranformer(nn.Module):
 
         # Decoding path
         h = self.dec_conv1(h, embed)
-        # h = self.dec_attn1(h)
+        h = self.dec_attn1(h)
         h = self.up1(h)
 
     
         h = torch.cat([h, h4], dim=1)
         h = self.dec_conv2(h, embed)
-        # h = self.dec_attn2(h)
+        h = self.dec_attn2(h)
         h = self.up2(h)
 
         h = torch.cat([h, h3], dim=1)

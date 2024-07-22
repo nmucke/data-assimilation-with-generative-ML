@@ -34,24 +34,24 @@ def main():
 
     device = 'cuda' #@param ['cuda', 'cpu'] {'type':'string'}
 
-    model_args = {
-        'img_size': 64,
-        'dim': 256,
-        'patch_size': 8,
-        'depth': 4,
-        'heads': 8,
-        'mlp_dim': 1024,
-        'k': 128,
-        'in_channels': 4,
-    }
+    # model_args = {
+    #     'img_size': 64,
+    #     'dim': 256,
+    #     'patch_size': 8,
+    #     'depth': 4,
+    #     'heads': 8,
+    #     'mlp_dim': 1024,
+    #     'k': 128,
+    #     'in_channels': 4,
+    # }
     model_args = {
         'marginal_prob_std':None, 
         'in_channels':4,
-        'channels':[16, 32, 64, 128],
+        'channels':[8, 16, 32, 64],
         'imsize':64,
     }
     forward_model = ForwardModel(model_args)
-    forward_model.load_state_dict(torch.load('forward_model.pth'))
+    # forward_model.load_state_dict(torch.load('forward_model.pth'))
 
     forward_model = forward_model.to(device)
 
@@ -93,6 +93,9 @@ def main():
 
             pars = pars.to(device)
             ft = ft.to(device)
+
+            pars_noise = torch.randn_like(pars) * 1e-2
+            pars = pars + pars_noise
 
             i = np.random.randint(0, ft.shape[-1]-num_steps)
 

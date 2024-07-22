@@ -104,7 +104,7 @@ def observation_operator(x):
     return x
 
 
-# @ray.remote
+@ray.remote
 def compute_posterior_samples(
     sampling_model,
     observation_operator,
@@ -175,8 +175,9 @@ def compute_HMC_samples(
 def main():
 
     path = 'data/geodata/processed_DARTS_simulation_realization'
+
     dataset = ForwardModelDataset(path=path)
-    state, pars, ft = dataset.__getitem__(10)
+    state, pars, ft = dataset.__getitem__(25)
     
     state = state.unsqueeze(0)
     pars = pars.unsqueeze(0)
@@ -191,25 +192,21 @@ def main():
     marginal_prob_std_fn = functools.partial(marginal_prob_std, sigma=sigma)
     diffusion_coeff_fn = functools.partial(diffusion_coeff, sigma=sigma)
 
-    score_model = UNet_Tranformer(marginal_prob_std=marginal_prob_std_fn, imsize=64, in_channels=1)
+    pars_model_args = {
+        'marginal_prob_std': marginal_prob_std_fn, 
+        'in_channels': 1,
+        'channels': [4, 8, 16, 32],
+        'imsize': 64
+    }
+    score_model = UNet_Tranformer(**pars_model_args)
     score_model.load_state_dict(torch.load('diffusion_model.pth'))
     score_model = score_model.to(device)
     score_model.eval()
 
     model_args = {
-        'img_size': 64,
-        'dim': 256,
-        'patch_size': 8,
-        'depth': 4,
-        'heads': 8,
-        'mlp_dim': 1024,
-        'k': 128,
-        'in_channels': 4,
-    }
-    model_args = {
         'marginal_prob_std':None, 
         'in_channels':4,
-        'channels':[32, 64, 128, 256],
+        'channels':[8, 16, 32, 64],
         'imsize':64,
     }
     forward_model = ForwardModel(model_args)
@@ -218,7 +215,7 @@ def main():
     forward_model.eval()
      
 
-    num_chains = 8
+    num_chains = 10
 
     sampling_model = functools.partial(
         latent_to_sample, 
@@ -252,37 +249,13 @@ def main():
         batch_size=num_chains
     )
 
-
-    N_samples_pr_chain = 10
-    N = N_samples_pr_chain * num_chains
-    burn = 10
-    step_size = 1.0
-    L = 5
-    latent_hmc = []
-    latent_map = []
-    # ray.init(num_cpus=num_chains)
-    # for i in range(num_chains):
-
-    #     latent_map_i = compute_posterior_samples.remote(
-    #         sampling_model=sampling_model,
-    #         observation_operator=observation_operator,
-    #         log_prob=log_prob,
-    #         device=device
-    #     )
-
-    #     latent_map.append(latent_map_i)
-
-    # latent_map = ray.get(latent_map)
-    # latent_map = torch.stack(latent_map)
-
-
     latent_vec = torch.randn(num_chains, 1, 64, 64).to(device)
     latent_map = compute_maximum_a_posteriori(
         latent_vec=latent_vec,
         sampling_model=sampling_model,
         observation_operator=observation_operator,
         log_prob=log_prob,
-        num_iterations=300,
+        num_iterations=250,
         lr=5e-2
     )
 
@@ -320,29 +293,17 @@ def main():
         batch_size=1
     )
 
-     # HMC NUTS
-    # params_init = latent_vec.clone().flatten()#torch.randn(1, 1, 64, 64).to(device)
-    # params_init = params_init.to(device)
-    # N_nuts = burn + N_samples_pr_chain
-    # latent_hmc_chain = hamiltorch.sample(
-    #     log_prob_func=log_prob, 
-    #     params_init=params_init,
-    #     num_samples=N_nuts,
-    #     step_size=step_size,
-    #     num_steps_per_sample=L,
-    #     sampler=hamiltorch.Sampler.HMC_NUTS, 
-    #     burn=burn,
-    #     desired_accept_rate=0.80
-    # )
-
-    # latent_hmc_chain = torch.stack(latent_hmc_chain)
-    # # latent_hmc = latent_hmc.reshape(N, 1, 64, 64)
+    N_samples_pr_chain = 10
+    N = N_samples_pr_chain * num_chains
+    burn = 90
+    step_size = 0.1
+    L = 5
 
     ray.init(num_cpus=num_chains)
     latent_hmc = []
     for i in range(num_chains):
         latent_hmc_chain = compute_HMC_samples.remote(
-            latent_vec=latent_vec[i:i+1].to('cpu'),
+            latent_vec=latent_vec[i].to('cpu'),
             log_prob=log_prob,
             N_samples_pr_chain=N_samples_pr_chain,
             burn=burn,
@@ -355,6 +316,9 @@ def main():
 
     latent_hmc = ray.get(latent_hmc)
     latent_hmc = torch.stack(latent_hmc)
+
+    # N = num_chains
+    # latent_hmc = latent_vec.cpu().clone()
 
     latent_hmc = latent_hmc.reshape(N, 1, 64, 64)
 

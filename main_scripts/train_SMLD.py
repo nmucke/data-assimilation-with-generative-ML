@@ -28,8 +28,6 @@ from data_assimilation_with_generative_ML.diffusion_models import (
 from data_assimilation_with_generative_ML.neural_network_models import DiT
 from data_assimilation_with_generative_ML.transformer_layers import UNet_Tranformer
 
-
-
 def main():
     #@title Set up the SDE
 
@@ -51,7 +49,7 @@ def main():
         channels=[4, 8, 16, 32],
         imsize=64,
     )
-    # score_model.load_state_dict(torch.load('diffusion_model.pth'))
+    score_model.load_state_dict(torch.load('diffusion_model.pth'))
     score_model = score_model.to(device)
 
 
@@ -151,7 +149,7 @@ def main():
         torch.save(score_model.state_dict(), 'diffusion_model.pth')
 
 
-        if epoch % 100 == 0:
+        if epoch % 50 == 0:
             x = next(iter(data_loader)).cpu().numpy()
 
             score_model.eval()
