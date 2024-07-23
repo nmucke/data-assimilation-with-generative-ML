@@ -28,12 +28,12 @@ from data_assimilation_with_generative_ML.forward_models import ForwardModel
 from data_assimilation_with_generative_ML.neural_network_models import DiT
 
 
-
+import os
 def main():
     #@title Set up the SDE
-
+  
     device = 'cuda' #@param ['cuda', 'cpu'] {'type':'string'}
-
+    #os.environ['CUDA_VISIBLE_DEVICES'] = '0'
     # model_args = {
     #     'img_size': 64,
     #     'dim': 256,
@@ -58,7 +58,7 @@ def main():
 
     n_epochs =   5000#@param {'type':'integer'}
     ## size of a mini-batch
-    batch_size = 8 #@param {'type':'integer'}
+    batch_size = 60 #@param {'type':'integer'}
     ## learning rate
     lr=5e-4 #@param {'type':'number'}
 
@@ -67,7 +67,7 @@ def main():
     # state = torch.permute(state, (1, 2, 3, 0))
     
     # dataset = ForwardModelDataset(path='data/results64/simulation_results_realization_64x64')
-    path = 'data/geodata/processed_DARTS_simulation_realization'
+    path = '/samoa/data/smrserraoseabr/GenerateModels/FlowDARTS/runs/ccus_64x64x1_1_for_NN_treated/processed_DARTS_simulation_realization'
     dataset = ForwardModelDataset(path=path)
 
     
