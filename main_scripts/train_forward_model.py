@@ -55,7 +55,7 @@ def main():
     forward_model = forward_model.to(device)
 
     n_epochs =   5000
-    batch_size = 16
+    batch_size = 8
     lr=5e-4 
     
     path = 'data/geodata/processed_DARTS_simulation_realization'
@@ -135,11 +135,10 @@ def main():
 
             pred_state = pred_state.detach().cpu().numpy()
 
-
             x = state.cpu().numpy()
             t_vec = [30, 60, 90, 119]
             pres_min = x[0, 0].min()
-            pres_max = x[0, 0].max()    
+            pres_max = x[0, 0].max()
 
             err_min = (x[0, 0] - pred_state[0, 0]).min()
             err_max = (x[0, 0] - pred_state[0, 0]).max()

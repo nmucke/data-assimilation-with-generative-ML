@@ -24,8 +24,6 @@ import ray
 
 from data_assimilation_with_generative_ML.bayesian_inference.utils import latent_to_state, log_posterior, observation_operator
 
-
-
 hamiltorch.set_random_seed(123)
 
 # set font size of plots
@@ -50,7 +48,6 @@ def main():
     pars = pars.to(device)
     ft = ft.to(device)
 
-
     sigma =  25.0
     marginal_prob_std_fn = functools.partial(marginal_prob_std, sigma=sigma)
     diffusion_coeff_fn = functools.partial(diffusion_coeff, sigma=sigma)
@@ -58,7 +55,7 @@ def main():
     pars_model_args = {
         'marginal_prob_std': marginal_prob_std_fn, 
         'in_channels': 1,
-        'channels': [4, 8, 16, 32],
+        'channels': [16, 32, 64, 128], # [4, 8, 16, 32]
         'imsize': 64
     }
     score_model = UNet_Tranformer(**pars_model_args)
@@ -76,7 +73,6 @@ def main():
     forward_model.load_state_dict(torch.load('forward_model.pth'))
     forward_model = forward_model.to(device)
     forward_model.eval()
-     
 
     num_chains = 10
 
@@ -220,7 +216,8 @@ def main():
         pars_map=pars_map,
         pars_monte_carlo=pars_hmc,
         X=X,
-        Y=Y
+        Y=Y,
+        plot_path='hmc_inverse'
     )
 
 if __name__ == "__main__":

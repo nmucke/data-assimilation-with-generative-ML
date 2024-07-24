@@ -52,7 +52,6 @@ class SVGD:
         phi = (K_XX.detach().matmul(score_func) + grad_K) / X.size(0)
 
         return phi
-    
 
     def step(self, X):
         self.optim.zero_grad()

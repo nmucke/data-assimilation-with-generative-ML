@@ -42,7 +42,7 @@ def main():
     path = 'data/geodata/processed_DARTS_simulation_realization'
 
     dataset = ForwardModelDataset(path=path)
-    state, pars, ft = dataset.__getitem__(25)
+    state, pars, ft = dataset.__getitem__(50)
     
     state = state.unsqueeze(0)
     pars = pars.unsqueeze(0)
@@ -60,7 +60,7 @@ def main():
     pars_model_args = {
         'marginal_prob_std': marginal_prob_std_fn, 
         'in_channels': 1,
-        'channels': [4, 8, 16, 32],
+        'channels': [16, 32, 64, 128], # [4, 8, 16, 32]
         'imsize': 64
     }
     score_model = UNet_Tranformer(**pars_model_args)
@@ -81,18 +81,6 @@ def main():
 
     N = 12
 
-    sampling_model = functools.partial(
-        latent_to_state, 
-        gen_model=score_model, 
-        forward_model=forward_model,
-        marginal_prob_std_fn=marginal_prob_std_fn, 
-        diffusion_coeff_fn=diffusion_coeff_fn, 
-        device=device,
-        ft=ft,
-        state_0=state[:, :, :, :, 0],
-        batch_size=N,
-        num_generative_steps=10
-    )
 
     noise_std = 0.01
     state_true = state.clone()
@@ -113,16 +101,28 @@ def main():
     num_obs_X = len(x)
     num_obs_Y = len(y)
 
+    sampling_model = functools.partial(
+        latent_to_state, 
+        gen_model=score_model, 
+        forward_model=forward_model,
+        marginal_prob_std_fn=marginal_prob_std_fn, 
+        diffusion_coeff_fn=diffusion_coeff_fn, 
+        device=device,
+        ft=ft,
+        state_0=state[:, :, :, :, 0],
+        batch_size=1,
+        num_generative_steps=10
+    )
     log_prob = functools.partial(
         log_posterior, 
         observations=state_obs, 
         observations_operator=observation_operator, 
         sampling_model=sampling_model, 
         noise_std=noise_std,
-        batch_size=N
+        batch_size=1
     )
 
-    latent_map = torch.randn(N, 1, 64, 64).to(device)
+    latent_map = torch.randn(1, 1, 64, 64).to(device)
 
     latent_map = compute_maximum_a_posteriori(
         latent_vec=latent_map,
@@ -134,15 +134,37 @@ def main():
     state_map = sampling_model(latent_map)
     state_map_obs = observation_operator(state_map)
 
-    latent_map = latent_map.reshape(N, 1, score_model.imsize, score_model.imsize)
+    latent_map = latent_map.reshape(1, 1, score_model.imsize, score_model.imsize)
 
     pars_map = ode_sampler(
         z=latent_map,
-        score_model=score_model, 
+        score_model=score_model,    
         marginal_prob_std=marginal_prob_std_fn, 
         diffusion_coeff=diffusion_coeff_fn, 
         num_steps=15,
         device=device
+    )
+
+
+    sampling_model = functools.partial(
+        latent_to_state, 
+        gen_model=score_model, 
+        forward_model=forward_model,
+        marginal_prob_std_fn=marginal_prob_std_fn, 
+        diffusion_coeff_fn=diffusion_coeff_fn, 
+        device=device,
+        ft=ft,
+        state_0=state[:, :, :, :, 0],
+        batch_size=N,
+        num_generative_steps=10
+    )
+    log_prob = functools.partial(
+        log_posterior, 
+        observations=state_obs, 
+        observations_operator=observation_operator, 
+        sampling_model=sampling_model, 
+        noise_std=noise_std,
+        batch_size=N
     )
     
     latent_vec = torch.randn(N, 1, 64, 64).to(device)
@@ -150,7 +172,7 @@ def main():
     latent_svgd = compute_SVGD(
         latent_vec=latent_vec,
         log_prob=log_prob,
-        num_iterations=1,
+        num_iterations=100,
         lr=5e-2,
     )
 
@@ -159,7 +181,7 @@ def main():
     with torch.no_grad():
         state_svgd = sampling_model(latent_svgd)
 
-    state_svgd_obs = torch.zeros(N, 2, num_obs_X, num_obs_X, 120)
+    state_svgd_obs = torch.zeros(N, 2, num_obs_X, num_obs_X, 121)
     for i in range(N):
         state_svgd_obs[i] = observation_operator(state_svgd[i:i+1])
 
@@ -188,7 +210,8 @@ def main():
         pars_map=pars_map,
         pars_monte_carlo=pars_svgd,
         X=X,
-        Y=Y
+        Y=Y,
+        plot_path='svgd_inverse'
     )
 
 if __name__ == "__main__":

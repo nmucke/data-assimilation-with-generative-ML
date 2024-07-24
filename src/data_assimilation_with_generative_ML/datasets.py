@@ -1,3 +1,4 @@
+import pdb
 import torch
 import numpy as np
 import xarray as xr
@@ -50,7 +51,11 @@ class ForwardModelDataset(torch.utils.data.Dataset):
 
         state = torch.permute(state, (1, 2, 3, 0))
 
-        # state[0] = (state[0] - self.pressure_mean) / self.pressure_std
+        init_condition = torch.zeros(3, 64, 64, 1)
+        init_condition[0] = 51.5 * torch.ones(64, 64, 1)
+        init_condition[1] = 0.99995 * torch.ones(64, 64, 1)
+        state = torch.cat([init_condition, state], dim=3)
+
 
         state[0] = (state[0] - self.pressure_min) / (self.pressure_max - self.pressure_min)
         state[2] = (state[2] - self.U_z_min) / (self.U_z_max - self.U_z_min)
@@ -58,8 +63,8 @@ class ForwardModelDataset(torch.utils.data.Dataset):
         pars[0] = (pars[0] - self.perm_mean) / self.perm_std
         #pars[1] = (pars[1] - self.por_mean) / self.por_std
 
+        ft = torch.cat([ft[0:1], ft], dim=0)
         ft = (ft - self.ft_min) / (self.ft_max - self.ft_min)
-
 
         return state, pars, ft
     

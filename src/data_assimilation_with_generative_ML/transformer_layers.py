@@ -566,5 +566,6 @@ class UNet_Tranformer(nn.Module):
         # Normalize output
         if self.marginal_prob_std is not None:
             h = h / self.marginal_prob_std(t)[:, None, None, None]
+            
         return h
     

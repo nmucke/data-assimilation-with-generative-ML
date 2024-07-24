@@ -332,20 +332,6 @@ def ode_sampler(score_model,
     shape = init_x.shape
     device = init_x.device
 
-    # def score_eval_wrapper(sample, time_steps):
-    #     """A wrapper of the score-based model for use by the ODE solver."""
-    #     sample = torch.tensor(sample, device=device, dtype=torch.float32).reshape(shape)
-    #     time_steps = torch.tensor(time_steps, device=device, dtype=torch.float32).reshape((sample.shape[0], ))      
-    #     score = score_model(sample, time_steps)
-    #     return score.reshape((-1,))
-        #return score.cpu().numpy().reshape((-1,)).astype(np.float64)
-    
-    # def ode_func(t, x):        
-    #     """The ODE function for use by the ODE solver."""
-    #     time_steps = np.ones((shape[0],)) * t    
-    #     g = diffusion_coeff(torch.tensor(t))
-    #     return  -0.5 * (g**2) * score_model(x, time_steps)#score_eval_wrapper(x, time_steps)
-    
     # Wrap the ODE function for use by the ODE solver.
     ode_func = ODE_wrapper(score_model, shape, device)
 
@@ -353,10 +339,5 @@ def ode_sampler(score_model,
     
     res = odeint_adjoint(ode_func, init_x, t_vec, method='midpoint', rtol=rtol, atol=atol)
     
-    # Run the black-box ODE solver.
-    # res = integrate.solve_ivp(ode_func, (1., eps), init_x.reshape(-1).cpu().numpy(), rtol=rtol, atol=atol, method='RK45')  
-    # print(f"Number of function evaluations: {res.nfev}")
-    # x = torch.tensor(res.y[:, -1], device=device).reshape(shape)
-
     return res[-1]
 

@@ -90,6 +90,7 @@ def plot_monte_carlo_results(
     pars_monte_carlo,
     X,
     Y,
+    plot_path
 ):
     
     pres_min = state_true[0, 0].min().item()
@@ -239,6 +240,6 @@ def plot_monte_carlo_results(
     plt.grid()
     plt.title('Displacement observations')
 
-    plt.savefig('inverse_monte_carlo.pdf')
+    plt.savefig(f'{plot_path}.pdf')
     
     plt.close()
