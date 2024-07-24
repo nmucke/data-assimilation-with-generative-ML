@@ -174,7 +174,7 @@ def compute_HMC_samples(
 
 def main():
 
-    path = 'data/geodata/processed_DARTS_simulation_realization'
+    path = '/samoa/data/smrserraoseabr/GenerateModels/FlowDARTS/runs/ccus_64x64x1_1_for_NN_treated/processed_DARTS_simulation_realization'
 
     dataset = ForwardModelDataset(path=path)
     state, pars, ft = dataset.__getitem__(25)
@@ -293,7 +293,7 @@ def main():
         batch_size=1
     )
 
-    N_samples_pr_chain = 10
+    N_samples_pr_chain = 20
     N = N_samples_pr_chain * num_chains
     burn = 90
     step_size = 0.1

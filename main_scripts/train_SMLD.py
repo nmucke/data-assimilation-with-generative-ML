@@ -49,14 +49,14 @@ def main():
         channels=[4, 8, 16, 32],
         imsize=64,
     )
-    score_model.load_state_dict(torch.load('diffusion_model.pth'))
+    score_model.load_state_dict(torch.load('/samoa/data/smrserraoseabr/data-assimilation-with-generative-ML/diffusion_model.pth'))
     score_model = score_model.to(device)
 
 
 
     n_epochs =   5000#@param {'type':'integer'}
     ## size of a mini-batch
-    batch_size =  16 #@param {'type':'integer'}
+    batch_size =  64 #@param {'type':'integer'}
     ## learning rate
     lr=5e-4 #@param {'type':'number'}
 
@@ -78,7 +78,7 @@ def main():
     # U_z min: -0.03506183251738548, Max: -7.1078920882428065e-06
 
 
-    dataset = ParsDataset(path='data/geodata/processed_DARTS_simulation_realization')
+    dataset = ParsDataset(path = '/samoa/data/smrserraoseabr/GenerateModels/FlowDARTS/runs/ccus_64x64x1_1_for_NN_treated/processed_DARTS_simulation_realization')
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4)
 
 

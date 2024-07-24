@@ -58,7 +58,7 @@ def main():
 
     n_epochs =   5000#@param {'type':'integer'}
     ## size of a mini-batch
-    batch_size = 60 #@param {'type':'integer'}
+    batch_size = 20 #@param {'type':'integer'}
     ## learning rate
     lr=5e-4 #@param {'type':'number'}
 

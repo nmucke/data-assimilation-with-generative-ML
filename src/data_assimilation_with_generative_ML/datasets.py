@@ -31,7 +31,7 @@ class ForwardModelDataset(torch.utils.data.Dataset):
 
 
     def __len__(self):
-        return 100 # len(self.ids_list)
+        return 2000 # len(self.ids_list)
 
     def __getitem__(self, idx):
 
@@ -68,7 +68,7 @@ class ParsDataset(torch.utils.data.Dataset):
     def __init__(self, path):
         self.path = path
 
-        self.ids_list = range(0, 1342)
+        self.ids_list = range(0, 2000)
 
         self.min = 1e8
         self.max = 0
