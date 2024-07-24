@@ -31,7 +31,7 @@ class ForwardModelDataset(torch.utils.data.Dataset):
 
 
     def __len__(self):
-        return 100 # len(self.ids_list)
+        return len(self.ids_list)
 
     def __getitem__(self, idx):
 

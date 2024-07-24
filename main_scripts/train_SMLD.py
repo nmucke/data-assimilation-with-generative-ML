@@ -29,92 +29,29 @@ from data_assimilation_with_generative_ML.neural_network_models import DiT
 from data_assimilation_with_generative_ML.transformer_layers import UNet_Tranformer
 
 def main():
-    #@title Set up the SDE
 
-    device = 'cuda' #@param ['cuda', 'cpu'] {'type':'string'}
+    device = 'cuda'
 
 
-    sigma =  25.0#@param {'type':'number'}
+    sigma =  25.0
     marginal_prob_std_fn = functools.partial(marginal_prob_std, sigma=sigma)
     diffusion_coeff_fn = functools.partial(diffusion_coeff, sigma=sigma)
 
-
-    # score_model  = DiTScoreNet(marginal_prob_std=marginal_prob_std_fn, imsize=64)
-    # score_model = torch.nn.DataParallel(ConvScoreNet(marginal_prob_std=marginal_prob_std_fn))
-    # score_model = ConvScoreNet(marginal_prob_std=marginal_prob_std_fn, imsize=64, in_channels=1)
-    # score_model = DiTScoreNet(marginal_prob_std=marginal_prob_std_fn, imsize=64, in_channels=1)
     score_model = UNet_Tranformer(
         marginal_prob_std=marginal_prob_std_fn, 
         in_channels=1,
-        channels=[4, 8, 16, 32],
+        channels=[16, 32, 64, 128], # [4, 8, 16, 32]
         imsize=64,
     )
-    score_model.load_state_dict(torch.load('diffusion_model.pth'))
+    # score_model.load_state_dict(torch.load('diffusion_model.pth'))
     score_model = score_model.to(device)
 
-
-
-    n_epochs =   5000#@param {'type':'integer'}
-    ## size of a mini-batch
-    batch_size =  16 #@param {'type':'integer'}
-    ## learning rate
-    lr=5e-4 #@param {'type':'number'}
-
-    # dataset = MNIST('.', train=True, transform=transform, download=True)
-    
-    # Sample only 5000 samples for training
-    # dataset = torch.utils.data.Subset(dataset, np.random.choice(len(dataset), 5000))
-    # data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4)
-    # ds = xr.load_dataset(f'data/64x64.nc')
-    # x = ds['facies code'].isel(Z=0, Realization=1).plot()
-
-
-    # ds = xr.load_dataset('data/geodata/processed_DARTS_simulation_realization_0.nc')
-    # show me all variable names
-    # ds.data_vars
-    # c_0_rate Min: 6.760696180663217e-08, Max: 0.0009333082125522196
-    # H2O Mean: 0.9997552563110158, Std: 0.004887599662507033
-    # PRESSURE 59.839262017194635, Std: 16.946480998339133
-    # U_z min: -0.03506183251738548, Max: -7.1078920882428065e-06
-
+    n_epochs = 5000
+    batch_size = 16
+    lr=5e-4
 
     dataset = ParsDataset(path='data/geodata/processed_DARTS_simulation_realization')
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4)
-
-
-    # dataset = dataset['facies code'].data[:]
-    # dataset = torch.tensor(dataset, dtype=torch.float32)
-    # num_samples = dataset.shape[0]
-
-    # compute mean over the full dataset by looping over the dataloader
-    # mean = 0.
-    # num_items = 0
-
-    # min = 1e8
-    # for x in data_loader:
-    #     mean += x.mean().item()# * x.shape[0]
-    #     num_items += 1#x.shape[0]
-
-    #     if x.min() < min:
-    #         min = x.min()
-    # mean /= num_items
-    
-    # # compute standard deviation over the full dataset by looping over the dataloader
-    # std = 0.
-    # num_items = 0
-    # max = -1e8
-    # for x in data_loader:
-    #     std += x.std().item() * x.shape[0]
-    #     num_items += x.shape[0]
-
-    #     if x.max() > max:
-    #         max = x.max()
-
-    # std /= num_items
-
-    # print(f'Mean: {mean}, Std: {std}')
-    # print(f'Min: {min}, Max: {max}')
-
 
     optimizer = Adam(score_model.parameters(), lr=lr, weight_decay=1e-8)
 
@@ -124,15 +61,9 @@ def main():
     tqdm_epoch = tqdm.trange(n_epochs)
     for epoch in tqdm_epoch:
 
-        # Shuffle the dataset
-        # random_ids = np.random.permutation(num_samples)
-        # dataset = dataset[random_ids]
-
         avg_loss = 0.
         num_items = 0
         for x in data_loader:
-        # for batch_ids in range(0, num_samples, batch_size):
-            # x = dataset[batch_ids:batch_ids+batch_size]
             x = x.to(device)  
             loss = loss_fn(score_model, x, marginal_prob_std_fn)
             optimizer.zero_grad()
@@ -145,6 +76,7 @@ def main():
 
         # Print the averaged training loss so far.
         tqdm_epoch.set_description('Average Loss: {:5f}'.format(avg_loss / num_items))
+        
         # Update the checkpoint after each epoch of training.
         torch.save(score_model.state_dict(), 'diffusion_model.pth')
 
@@ -154,7 +86,7 @@ def main():
 
             score_model.eval()
             with torch.no_grad():
-                samples = pc_sampler(score_model, marginal_prob_std_fn, diffusion_coeff_fn, device=device, batch_size=8, num_steps=50)
+                samples = pc_sampler(score_model, marginal_prob_std_fn, diffusion_coeff_fn, device=device, batch_size=8, num_steps=10)
             samples = samples.cpu().numpy()
             samples = samples[:, 0]
             plt.figure()
@@ -173,7 +105,7 @@ def main():
             plt.close()
 
             with torch.no_grad():
-                samples = ode_sampler(score_model, marginal_prob_std_fn, diffusion_coeff_fn, device=device, num_steps=50, batch_size=8)
+                samples = ode_sampler(score_model, marginal_prob_std_fn, diffusion_coeff_fn, device=device, num_steps=10, batch_size=8)
             samples = samples.detach().cpu().numpy()
             samples = samples[:, 0]
             plt.figure()
@@ -196,3 +128,38 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+# dataset = dataset['facies code'].data[:]
+# dataset = torch.tensor(dataset, dtype=torch.float32)
+# num_samples = dataset.shape[0]
+
+# compute mean over the full dataset by looping over the dataloader
+# mean = 0.
+# num_items = 0
+
+# min = 1e8
+# for x in data_loader:
+#     mean += x.mean().item()# * x.shape[0]
+#     num_items += 1#x.shape[0]
+
+#     if x.min() < min:
+#         min = x.min()
+# mean /= num_items
+
+# # compute standard deviation over the full dataset by looping over the dataloader
+# std = 0.
+# num_items = 0
+# max = -1e8
+# for x in data_loader:
+#     std += x.std().item() * x.shape[0]
+#     num_items += x.shape[0]
+
+#     if x.max() > max:
+#         max = x.max()
+
+# std /= num_items
+
+# print(f'Mean: {mean}, Std: {std}')
+# print(f'Min: {min}, Max: {max}')

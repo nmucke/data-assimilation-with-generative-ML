@@ -30,9 +30,8 @@ from data_assimilation_with_generative_ML.neural_network_models import DiT
 
 
 def main():
-    #@title Set up the SDE
-
-    device = 'cuda' #@param ['cuda', 'cpu'] {'type':'string'}
+    
+    device = 'cuda'
 
     # model_args = {
     #     'img_size': 64,
@@ -51,50 +50,39 @@ def main():
         'imsize':64,
     }
     forward_model = ForwardModel(model_args)
-    # forward_model.load_state_dict(torch.load('forward_model.pth'))
+    forward_model.load_state_dict(torch.load('forward_model.pth'))
 
     forward_model = forward_model.to(device)
 
-
-    n_epochs =   5000#@param {'type':'integer'}
-    ## size of a mini-batch
-    batch_size = 8 #@param {'type':'integer'}
-    ## learning rate
-    lr=5e-4 #@param {'type':'number'}
-
-    # data = xr.load_dataset('data/geodata/processed_DARTS_simulation_realization_0.nc')
-    # state = np.concat((data['PRESSURE'].data, data['H2O'].data), axis=1)
-    # state = torch.permute(state, (1, 2, 3, 0))
+    n_epochs =   5000
+    batch_size = 16
+    lr=5e-4 
     
-    # dataset = ForwardModelDataset(path='data/results64/simulation_results_realization_64x64')
     path = 'data/geodata/processed_DARTS_simulation_realization'
     dataset = ForwardModelDataset(path=path)
-
-    
     data_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4)
 
     optimizer = Adam(forward_model.parameters(), lr=lr, weight_decay=1e-8)
 
-    # scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(optimizer, T_0=500, T_mult=1)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=n_epochs, eta_min=1e-6)
 
     loss_fn = nn.MSELoss()
     tqdm_epoch = tqdm.trange(n_epochs)
-    num_steps = 20
+    num_steps = 10
     for epoch in tqdm_epoch:
 
         avg_loss = 0.
         num_items = 0
 
-        if epoch % 100 == 0 and num_steps < 10:
-            num_steps += 1
+        # if epoch % 100 == 0 and num_steps < 10:
+        #     num_steps += 1
 
         for state, pars, ft in data_loader:
 
             pars = pars.to(device)
             ft = ft.to(device)
 
-            pars_noise = torch.randn_like(pars) * 1e-2
+            pars_noise = torch.randn_like(pars) * 1e-3
             pars = pars + pars_noise
 
             i = np.random.randint(0, ft.shape[-1]-num_steps)
@@ -117,6 +105,7 @@ def main():
 
         # Print the averaged training loss so far.
         tqdm_epoch.set_description('Average Loss: {:5f}'.format(avg_loss / num_items))
+
         # Update the checkpoint after each epoch of training.
         torch.save(forward_model.state_dict(), 'forward_model.pth')
 

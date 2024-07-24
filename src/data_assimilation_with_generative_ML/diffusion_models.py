@@ -351,7 +351,7 @@ def ode_sampler(score_model,
 
     t_vec = torch.linspace(1., eps, num_steps, device=device)
     
-    res = odeint_adjoint(ode_func, init_x, t_vec, method='rk4', rtol=rtol, atol=atol)
+    res = odeint_adjoint(ode_func, init_x, t_vec, method='midpoint', rtol=rtol, atol=atol)
     
     # Run the black-box ODE solver.
     # res = integrate.solve_ivp(ode_func, (1., eps), init_x.reshape(-1).cpu().numpy(), rtol=rtol, atol=atol, method='RK45')  
