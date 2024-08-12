@@ -1,5 +1,5 @@
 ### General
-
+src/data_assimilation_with_generative_ML/darts_geomech_runnable/
 # Exclude large files
 *.mp4
 *.tar
